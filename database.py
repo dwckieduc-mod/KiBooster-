@@ -1,10 +1,8 @@
-import os
+    import os
 import json
 import requests
 
-# Lấy thông tin từ Environment Variables
 GIST_ID = os.getenv("GIST_ID")
-# GITHUB_ID ở đây đóng vai trò là GitHub Personal Access Token để có quyền sửa Gist
 GITHUB_TOKEN = os.getenv("GITHUB_ID")
 
 HEADERS = {
@@ -12,11 +10,16 @@ HEADERS = {
     "Accept": "application/vnd.github.v3+json"
 } if GITHUB_TOKEN else {}
 
+DEFAULT_DATA = {
+    "links": {},    # { "guild_id": { "child_role_id": "parent_role_id" } }
+    "history": {}   # { "guild_id": { "user_id": ["child_role_id_1", ...] } }
+}
+
 def load_data() -> dict:
-    """Tải dữ liệu liên kết role từ Gist."""
+    """Tải dữ liệu liên kết và lịch sử gỡ role từ Gist."""
     if not GIST_ID:
         print("[DATABASE] Thiếu GIST_ID trong môi trường!")
-        return {}
+        return DEFAULT_DATA.copy()
     
     url = f"https://api.github.com/gists/{GIST_ID}"
     try:
@@ -25,13 +28,20 @@ def load_data() -> dict:
             files = res.json().get("files", {})
             if "roles.json" in files:
                 content = files["roles.json"]["content"]
-                return json.loads(content) if content else {}
+                data = json.loads(content) if content else {}
+                
+                # Chuyển đổi dữ liệu cũ sang cấu trúc mới nếu cần
+                if "links" not in data:
+                    data = {"links": data, "history": {}}
+                if "history" not in data:
+                    data["history"] = {}
+                return data
     except Exception as e:
         print(f"[DATABASE] Lỗi khi tải dữ liệu từ Gist: {e}")
-    return {}
+    return DEFAULT_DATA.copy()
 
 def save_data(data: dict) -> bool:
-    """Lưu dữ liệu liên kết role vào Gist."""
+    """Lưu dữ liệu vào Gist."""
     if not GIST_ID or not GITHUB_TOKEN:
         print("[DATABASE] Thiếu GIST_ID hoặc GITHUB_ID!")
         return False
@@ -50,4 +60,4 @@ def save_data(data: dict) -> bool:
     except Exception as e:
         print(f"[DATABASE] Lỗi khi lưu dữ liệu lên Gist: {e}")
         return False
-              
+        
