@@ -1,4 +1,4 @@
-    import os
+import os
 import json
 import requests
 
@@ -11,12 +11,12 @@ HEADERS = {
 } if GITHUB_TOKEN else {}
 
 DEFAULT_DATA = {
-    "links": {},    # { "guild_id": { "child_role_id": "parent_role_id" } }
-    "history": {}   # { "guild_id": { "user_id": ["child_role_id_1", ...] } }
+    "links": {},
+    "history": {}
 }
 
 def load_data() -> dict:
-    """Tải dữ liệu liên kết và lịch sử gỡ role từ Gist."""
+    """Tải dữ liệu liên kết từ Gist."""
     if not GIST_ID:
         print("[DATABASE] Thiếu GIST_ID trong môi trường!")
         return DEFAULT_DATA.copy()
@@ -29,8 +29,6 @@ def load_data() -> dict:
             if "roles.json" in files:
                 content = files["roles.json"]["content"]
                 data = json.loads(content) if content else {}
-                
-                # Chuyển đổi dữ liệu cũ sang cấu trúc mới nếu cần
                 if "links" not in data:
                     data = {"links": data, "history": {}}
                 if "history" not in data:
