@@ -154,9 +154,8 @@ class CustomRole(commands.Cog):
                 title="✅ Liên Kết Role Custom Thành Công",
                 color=discord.Color.green()
             )
-            embed.add_field(name="Role Custom", value=f"{child_role.mention} (ID: `{child_role.id}`)", inline=False)
-            embed.add_field(name="Chủ Sở Hữu", value=f"{member.mention} (ID: `{member.id}`)", inline=False)
-            embed.add_field(name="Yêu Cầu", value=f"Có Role Booster ({booster_text})", inline=False)
+            embed.add_field(name="Role Custom", value=f"{child_role.mention}", inline=False)
+            embed.add_field(name="Chủ Sở Hữu", value=f"{member.mention}", inline=False)
             
             await ctx.send(embed=embed)
         else:
