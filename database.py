@@ -11,12 +11,13 @@ HEADERS = {
 } if GITHUB_TOKEN else {}
 
 DEFAULT_DATA = {
-    "links": {},
+    "booster_roles": {},  # { "guild_id": "booster_role_id" }
+    "links": {},          # { "guild_id": { "child_role_id": { "user_id": "..." } } }
     "history": {}
 }
 
 def load_data() -> dict:
-    """Tải dữ liệu liên kết từ Gist."""
+    """Tải dữ liệu từ Gist."""
     if not GIST_ID:
         print("[DATABASE] Thiếu GIST_ID trong môi trường!")
         return DEFAULT_DATA.copy()
@@ -29,8 +30,12 @@ def load_data() -> dict:
             if "roles.json" in files:
                 content = files["roles.json"]["content"]
                 data = json.loads(content) if content else {}
+                
+                # Đảm bảo đủ các key mặc định
+                if "booster_roles" not in data:
+                    data["booster_roles"] = {}
                 if "links" not in data:
-                    data = {"links": data, "history": {}}
+                    data["links"] = {}
                 if "history" not in data:
                     data["history"] = {}
                 return data
