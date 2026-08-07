@@ -1,12 +1,80 @@
 import asyncio
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import database
 
 class CustomRole(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db = database.load_data()
+        self.auto_check_loop.start()
+
+    def cog_unload(self):
+        self.auto_check_loop.cancel()
+
+    # --- 🔄 VÒNG LẶP KIỂM TRA & ĐỒNG BỘ TỰ ĐỘNG (NGẦM) ---
+
+    @tasks.loop(minutes=1)
+    async def auto_check_loop(self):
+        """Vòng lặp ngầm chạy 1 phút/lần để quét và đồng bộ Role Custom toàn hệ thống."""
+        links_db = self.db.get("links", {})
+        booster_db = self.db.get("booster_roles", {})
+
+        if not links_db:
+            return
+
+        for guild_id_str, links in links_db.items():
+            guild = self.bot.get_guild(int(guild_id_str))
+            if not guild:
+                continue
+
+            booster_role_id = booster_db.get(guild_id_str)
+            if not booster_role_id:
+                continue
+
+            booster_role_id = str(booster_role_id)
+
+            for child_id_str, info in links.items():
+                owner_user_id = info.get("user_id") if isinstance(info, dict) else None
+                if not owner_user_id:
+                    continue
+
+                child_role = guild.get_role(int(child_id_str))
+                if not child_role:
+                    continue
+
+                owner_member = guild.get_member(int(owner_user_id))
+                if not owner_member:
+                    try:
+                        owner_member = await guild.fetch_member(int(owner_user_id))
+                    except discord.NotFound:
+                        owner_member = None
+
+                if owner_member:
+                    owner_role_ids = {str(r.id) for r in owner_member.roles}
+
+                    if booster_role_id in owner_role_ids and child_id_str not in owner_role_ids:
+                        try:
+                            await owner_member.add_roles(child_role, reason="Auto-Loop: Phát hiện có Role Booster")
+                        except Exception as e:
+                            print(f"[AUTO-LOOP ERROR ADD] {e}")
+
+                    elif booster_role_id not in owner_role_ids and child_id_str in owner_role_ids:
+                        try:
+                            await owner_member.remove_roles(child_role, reason="Auto-Loop: Mất Role Booster")
+                        except Exception as e:
+                            print(f"[AUTO-LOOP ERROR REMOVE] {e}")
+
+                for member in child_role.members:
+                    if str(member.id) != owner_user_id:
+                        try:
+                            await member.remove_roles(child_role, reason="Auto-Loop: Gỡ role bị cấp sai người")
+                        except Exception as e:
+                            print(f"[AUTO-LOOP ERROR REVOKE] {e}")
+
+    @auto_check_loop.before_loop
+    async def before_check_loop(self):
+        await self.bot.wait_until_ready()
 
     # --- 1. LỆNH CẤU HÌNH ROLE BOOSTER DÙNG CHUNG ---
 
@@ -44,7 +112,7 @@ class CustomRole(commands.Cog):
     @commands.command(name="link")
     @commands.has_permissions(manage_roles=True)
     async def link_roles(self, ctx, child_role: discord.Role, member: discord.Member):
-        """Liên kết Role Custom cho một User."""
+        """Liên kết Role Custom cho một User và tự động cấp role lập tức."""
         guild_id = str(ctx.guild.id)
         booster_role_id = self.db.get("booster_roles", {}).get(guild_id)
 
@@ -68,6 +136,20 @@ class CustomRole(commands.Cog):
             booster_role = ctx.guild.get_role(int(booster_role_id))
             booster_text = booster_role.mention if booster_role else f"ID `{booster_role_id}`"
             
+            # --- Thực hiện hành động ADD ROLE lập tức ---
+            user_role_ids = {str(r.id) for r in member.roles}
+            
+            if booster_role_id in user_role_ids:
+                try:
+                    await member.add_roles(child_role, reason="Cấp Role Custom khi thực hiện lệnh kb.link")
+                    status_text = "✅ **Đã thêm role trực tiếp cho người dùng thành công!**"
+                except discord.Forbidden:
+                    status_text = "⚠️ *Lưu liên kết thành công nhưng Bot thiếu quyền / Vị trí Role Bot thấp hơn Role Custom nên chưa add được.*"
+                except Exception as e:
+                    status_text = f"❌ *Lưu thành công nhưng gặp lỗi khi add role: {e}*"
+            else:
+                status_text = "⏳ *Đã lưu liên kết. Người dùng chưa có Role Booster nên sẽ tự động nhận role khi Boost server.*"
+
             embed = discord.Embed(
                 title="✅ Liên Kết Role Custom Thành Công",
                 color=discord.Color.green()
@@ -75,6 +157,8 @@ class CustomRole(commands.Cog):
             embed.add_field(name="🎭 Role Custom", value=f"{child_role.mention} (ID: `{child_role.id}`)", inline=False)
             embed.add_field(name="👤 Chủ Sở Hữu", value=f"{member.mention} (ID: `{member.id}`)", inline=False)
             embed.add_field(name="⚡ Yêu Cầu", value=f"Có Role Booster ({booster_text})", inline=False)
+            embed.add_field(name="📌 Trạng Thái Cấp Role", value=status_text, inline=False)
+            
             await ctx.send(embed=embed)
         else:
             embed = discord.Embed(
@@ -118,7 +202,7 @@ class CustomRole(commands.Cog):
         booster_name = booster_role.mention if booster_role else (f"ID: `{booster_role_id}`" if booster_role_id else "❌ *Chưa thiết lập (Dùng kb.booster)*")
 
         embed = discord.Embed(title="🔗 Danh Sách Role Custom", color=discord.Color.blue())
-        embed.description = f"⚡ **Role Booster chung:** {booster_name}\n"
+        embed.description = f"⚡ **Role Booster chung:** {booster_name}\n🔄 **Chế độ quét:** Tự động check ngầm mỗi 1 phút\n"
 
         if not links:
             embed.add_field(name="Thông báo", value="Chưa có liên kết role custom nào.", inline=False)
@@ -144,7 +228,7 @@ class CustomRole(commands.Cog):
     @commands.command(name="restore")
     @commands.has_permissions(manage_roles=True)
     async def restore_roles(self, ctx, member: discord.Member = None):
-        """Quét và cấp lại Role Custom cho đúng chủ sở hữu nếu họ có Role Booster."""
+        """Khôi phục thủ công lập tức mà không cần đợi vòng lặp ngầm."""
         guild_id = str(ctx.guild.id)
         guild_links = self.db["links"].get(guild_id, {})
         booster_role_id = self.db.get("booster_roles", {}).get(guild_id)
@@ -221,7 +305,7 @@ class CustomRole(commands.Cog):
         success = await asyncio.to_thread(database.save_data, self.db)
         if success:
             embed = discord.Embed(
-                title="🧹 Dọn Dẹp Dữ Liệu Dọn Dẹp",
+                title="🧹 Dọn Dẹp Dữ Liệu",
                 description="Đã xóa sạch toàn bộ dữ liệu cài đặt role của server này trên Database!",
                 color=discord.Color.green()
             )
@@ -233,7 +317,7 @@ class CustomRole(commands.Cog):
             )
         await ctx.send(embed=embed)
 
-    # --- 3. SỰ KIỆN THEO DÕI TỰ ĐỘNG GỠ / CẤP ROLE ---
+    # --- 3. SỰ KIỆN LẮNG NGHE SỰ THAY ĐỔI ROLE (REAL-TIME) ---
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
@@ -279,21 +363,15 @@ class CustomRole(commands.Cog):
         if roles_to_add:
             try:
                 await after.add_roles(*roles_to_add, reason="Liên kết ngầm: Có Role Booster")
-                print(f"[AUTO-ADD] Đã thêm {len(roles_to_add)} role cho {after.display_name}")
-            except discord.Forbidden:
-                print(f"[LỖI] Quyền của Bot thấp hơn Role cần thêm")
             except Exception as e:
                 print(f"[LỖI ADD] {e}")
 
         if roles_to_remove:
             try:
-                await after.remove_roles(*roles_to_remove, reason="Liên kết ngầm: Mất Role Booster hoặc không đúng chủ sở hữu")
-                print(f"[AUTO-REMOVE] Đã gỡ {len(roles_to_remove)} role từ {after.display_name}")
-            except discord.Forbidden:
-                print(f"[LỖI] Quyền của Bot thấp hơn Role cần gỡ")
+                await after.remove_roles(*roles_to_remove, reason="Liên kết ngầm: Mất Role Booster hoặc sai chủ sở hữu")
             except Exception as e:
                 print(f"[LỖI REMOVE] {e}")
 
 async def setup(bot):
     await bot.add_cog(CustomRole(bot))
-    
+                        
