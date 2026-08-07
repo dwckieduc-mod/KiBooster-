@@ -27,7 +27,7 @@ intents = discord.Intents.default()
 intents.members = True          # BẮT BUỘC: Để theo dõi biến động Role của Member
 intents.message_content = True  # BẮT BUỘC: Để nhận diện prefix command "kb."
 
-bot = commands.Bot(command_prefix="kb., KB., kB., Kb.", intents=intents)
+bot = commands.Bot(command_prefix="kb.", "KB.", "kB.", "Kb.", intents=intents)
 
 @bot.event
 async def on_ready():
