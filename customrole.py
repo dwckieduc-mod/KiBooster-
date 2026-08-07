@@ -109,7 +109,7 @@ class CustomRole(commands.Cog):
             owner_name = owner_member.mention if owner_member else (f"ID: `{user_id}`" if user_id else "Không xác định")
             
             embed.add_field(
-                name=f"Role Custom: {child_name}", 
+                name=f"Role Custom: {child_name} ", 
                 value=f"👤 **Chủ sở hữu:** {owner_name}", 
                 inline=False
             )
