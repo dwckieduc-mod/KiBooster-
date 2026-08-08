@@ -116,6 +116,7 @@ class CustomRole(commands.Cog):
         guild_id = str(ctx.guild.id)
         booster_role_id = self.db.get("booster_roles", {}).get(guild_id)
 
+        # 1. Kiểm tra cấu hình Role Booster
         if not booster_role_id:
             embed = discord.Embed(
                 title="⚠️ Chưa Thiết Lập Role Booster",
@@ -124,6 +125,25 @@ class CustomRole(commands.Cog):
             )
             return await ctx.send(embed=embed)
 
+        # 2. KIỂM TRA XEM ROLE NÀY ĐÃ ĐƯỢC LINK CHO USER KHÁC TRƯỚC ĐÓ CHƯA
+        existing_link = self.db.get("links", {}).get(guild_id, {}).get(str(child_role.id))
+        if existing_link:
+            existing_user_id = existing_link.get("user_id") if isinstance(existing_link, dict) else None
+            existing_member = ctx.guild.get_member(int(existing_user_id)) if existing_user_id else None
+            existing_owner_text = existing_member.mention if existing_member else f"ID User: `{existing_user_id}`"
+
+            embed = discord.Embed(
+                title="❌ Role Đã Được Liên Kết Trước Đó",
+                description=(
+                    f"Role {child_role.mention} hiện tại đã được gán cho {existing_owner_text}!\n\n"
+                    f"💡 *Nếu muốn chuyển role này cho {member.mention}, bạn cần gõ lệnh bên dưới để hủy liên kết cũ trước:*\n"
+                    f"`kb.unlink {child_role.mention}`"
+                ),
+                color=discord.Color.red()
+            )
+            return await ctx.send(embed=embed)
+
+        # 3. Tạo dữ liệu liên kết mới
         if guild_id not in self.db["links"]:
             self.db["links"][guild_id] = {}
 
@@ -136,15 +156,15 @@ class CustomRole(commands.Cog):
             booster_role = ctx.guild.get_role(int(booster_role_id))
             booster_text = booster_role.mention if booster_role else f"ID `{booster_role_id}`"
             
-            # --- Thực hiện hành động ADD ROLE lập tức ---
             user_role_ids = {str(r.id) for r in member.roles}
             
+            # Cấp role ngay nếu họ đã có Role Booster
             if booster_role_id in user_role_ids:
                 try:
                     await member.add_roles(child_role, reason="Cấp Role Custom khi thực hiện lệnh kb.link")
                     status_text = "✅ **Đã thêm role trực tiếp cho người dùng thành công!**"
                 except discord.Forbidden:
-                    status_text = "⚠️ *Lưu liên kết thành công nhưng Bot thiếu quyền / Vị trí Role Bot thấp hơn Role Custom nên chưa add được.*"
+                    status_text = "⚠️ *Lưu liên kết thành công nhưng Bot thiếu quyền hoặc vị trí Role của Bot thấp hơn Role Custom.*"
                 except Exception as e:
                     status_text = f"❌ *Lưu thành công nhưng gặp lỗi khi add role: {e}*"
             else:
@@ -154,8 +174,10 @@ class CustomRole(commands.Cog):
                 title="✅ Liên Kết Role Custom Thành Công",
                 color=discord.Color.green()
             )
-            embed.add_field(name="Role Custom", value=f"{child_role.mention}", inline=False)
-            embed.add_field(name="Chủ Sở Hữu", value=f"{member.mention}", inline=False)
+            embed.add_field(name="🎭 Role Custom", value=f"{child_role.mention} (ID: `{child_role.id}`)", inline=False)
+            embed.add_field(name="👤 Chủ Sở Hữu", value=f"{member.mention} (ID: `{member.id}`)", inline=False)
+            embed.add_field(name="⚡ Yêu Cầu", value=f"Có Role Booster ({booster_text})", inline=False)
+            embed.add_field(name="📌 Trạng Thái Cấp Role", value=status_text, inline=False)
             
             await ctx.send(embed=embed)
         else:
@@ -169,15 +191,31 @@ class CustomRole(commands.Cog):
     @commands.command(name="unlink")
     @commands.has_permissions(manage_roles=True)
     async def unlink_roles(self, ctx, child_role: discord.Role):
-        """Hủy liên kết của một Role Custom."""
+        """Hủy liên kết của một Role Custom và tự động gỡ role khỏi thành viên."""
         guild_id = str(ctx.guild.id)
         if guild_id in self.db["links"] and str(child_role.id) in self.db["links"][guild_id]:
+            members_with_role = list(child_role.members)
+            removed_count = 0
+
+            for member in members_with_role:
+                try:
+                    await member.remove_roles(child_role, reason="Hủy liên kết bằng lệnh kb.unlink")
+                    removed_count += 1
+                except Exception as e:
+                    print(f"[UNLINK ERROR REMOVE] {e}")
+
             del self.db["links"][guild_id][str(child_role.id)]
             await asyncio.to_thread(database.save_data, self.db)
             
+            description_text = f"Đã gỡ bỏ cài đặt liên kết cho role {child_role.mention}."
+            if members_with_role:
+                description_text += f"\n🧹 **Đã gỡ role trực tiếp khỏi {removed_count}/{len(members_with_role)} người dùng đang giữ role này.**"
+            else:
+                description_text += "\nℹ️ *Không có người dùng nào đang giữ role này.*"
+
             embed = discord.Embed(
                 title="✅ Hủy Liên Kết Thành Công",
-                description=f"Đã gỡ bỏ cài đặt liên kết cho role {child_role.mention}.",
+                description=description_text,
                 color=discord.Color.green()
             )
             await ctx.send(embed=embed)
@@ -372,4 +410,4 @@ class CustomRole(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(CustomRole(bot))
-                        
+            
